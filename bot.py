@@ -27,10 +27,6 @@ ANNOUNCE_HOUR = int(os.environ.get("ANNOUNCE_HOUR", "9"))
 ANNOUNCE_MINUTE = int(os.environ.get("ANNOUNCE_MINUTE", "0"))
 ANNOUNCE_TIME = dtime(hour=ANNOUNCE_HOUR, minute=ANNOUNCE_MINUTE, tzinfo=PARIS_TZ)
 
-# Catégories IGDB à inclure : 0=jeu principal, 4=extension autonome, 8=remake, 9=remaster
-# (on exclut DLC, ports, saisons... qui gonflent artificiellement le nombre de "sorties")
-INCLUDED_CATEGORIES = "(0,4,8,9)"
-
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
@@ -74,11 +70,8 @@ def get_todays_releases():
     """Interroge l'endpoint release_dates d'IGDB (une entrée par sortie, par
     plateforme/région), pour capter les sorties du jour même quand le jeu est
     déjà sorti sur une autre plateforme auparavant. Renvoie les TOP_N les
-    plus populaires.
-
-    MODE DEBUG : filtre de catégorie désactivé + logs détaillés, le temps de
-    diagnostiquer pourquoi certaines sorties ne remontent pas.
-    """
+    plus populaires (le tri par score fait office de filtre : pas de filtre
+    de catégorie, car beaucoup de jeux n'ont pas ce champ renseigné)."""
     token = get_igdb_token()
 
     today_str = datetime.now(PARIS_TZ).strftime("%Y-%m-%d")
@@ -86,15 +79,13 @@ def get_todays_releases():
     start_ts = int(start_dt.timestamp())
     end_ts = start_ts + 86400
 
-    print(f"🔍 DEBUG - Date recherchée : {today_str} | start_ts={start_ts} end_ts={end_ts}")
-
     headers = {
         "Client-ID": TWITCH_CLIENT_ID,
         "Authorization": f"Bearer {token}",
         "Content-Type": "text/plain",
     }
     body = (
-        "fields date,game.id,game.name,game.category,game.summary,game.url,"
+        "fields date,game.id,game.name,game.summary,game.url,"
         "game.hypes,game.follows,game.total_rating,game.cover.url;"
         f" where date >= {start_ts} & date < {end_ts};"
         " limit 500;"
@@ -104,12 +95,13 @@ def get_todays_releases():
         "https://api.igdb.com/v4/release_dates", headers=headers, data=body, timeout=15
     )
     if not response.ok:
-        print(f"⚠️ DEBUG - Erreur HTTP {response.status_code} : {response.text}")
+        print(f"⚠️ Erreur HTTP IGDB {response.status_code} : {response.text}")
         response.raise_for_status()
 
     entries = response.json()
-    print(f"🔍 DEBUG - {len(entries)} entrées release_dates brutes reçues")
 
+    # Un même jeu peut apparaître plusieurs fois (une entrée par plateforme/région) :
+    # on ne garde qu'une entrée par jeu.
     games_by_id = {}
     for entry in entries:
         game = entry.get("game")
@@ -118,9 +110,7 @@ def get_todays_releases():
         games_by_id[game["id"]] = game
 
     games = list(games_by_id.values())
-    print(f"🔍 DEBUG - {len(games)} jeux uniques après dédoublonnage")
-    for game in games:
-        print(f"🔍 DEBUG -   • {game.get('name')} (catégorie={game.get('category')})")
+    print(f"ℹ️ {len(games)} sortie(s) trouvée(s) aujourd'hui, avant sélection du top {TOP_N}")
 
     for game in games:
         hypes = game.get("hypes") or 0
