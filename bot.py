@@ -71,8 +71,10 @@ def build_cover_url(cover_url):
 
 
 def get_todays_releases():
-    """Interroge IGDB pour les jeux sortant aujourd'hui (heure de Paris),
-    et renvoie les TOP_N les plus populaires."""
+    """Interroge l'endpoint release_dates d'IGDB (une entrée par sortie, par
+    plateforme/région), pour capter les sorties du jour même quand le jeu est
+    déjà sorti sur une autre plateforme auparavant. Renvoie les TOP_N les
+    plus populaires."""
     token = get_igdb_token()
 
     today_str = datetime.now(PARIS_TZ).strftime("%Y-%m-%d")
@@ -86,18 +88,29 @@ def get_todays_releases():
         "Content-Type": "text/plain",
     }
     body = (
-        "fields name,summary,url,first_release_date,hypes,follows,total_rating,cover.url;"
-        f" where first_release_date >= {start_ts} & first_release_date < {end_ts}"
-        f" & category = {INCLUDED_CATEGORIES};"
+        "fields date,game.id,game.name,game.summary,game.url,"
+        "game.hypes,game.follows,game.total_rating,game.cover.url;"
+        f" where date >= {start_ts} & date < {end_ts}"
+        f" & game.category = {INCLUDED_CATEGORIES};"
         " limit 500;"
     )
 
     response = requests.post(
-        "https://api.igdb.com/v4/games", headers=headers, data=body, timeout=15
+        "https://api.igdb.com/v4/release_dates", headers=headers, data=body, timeout=15
     )
     response.raise_for_status()
-    games = response.json()
+    entries = response.json()
 
+    # Un même jeu peut apparaître plusieurs fois (une entrée par plateforme/région) :
+    # on ne garde qu'une entrée par jeu.
+    games_by_id = {}
+    for entry in entries:
+        game = entry.get("game")
+        if not game or "id" not in game:
+            continue
+        games_by_id[game["id"]] = game
+
+    games = list(games_by_id.values())
     for game in games:
         hypes = game.get("hypes") or 0
         follows = game.get("follows") or 0
