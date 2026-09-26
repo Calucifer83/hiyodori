@@ -1,9 +1,9 @@
 """
-Bot Discord - Annonces de sorties de jeux vidéo (100% automatique via IGDB)
-----------------------------------------------------------------------------
-Chaque jour à heure fixe (heure de Paris), interroge l'API IGDB pour
-récupérer les jeux sortant ce jour-là, calcule un score de popularité,
-et poste les N meilleurs dans un channel Discord.
+Discord Bot - Game Release Announcements (fully automated via IGDB)
+---------------------------------------------------------------------
+Every day at a fixed time (Paris timezone), queries the IGDB API for
+games releasing that day, ranks them by a popularity score, and posts
+the top N in a Discord channel.
 """
 
 import os
@@ -15,7 +15,7 @@ import requests
 import discord
 from discord.ext import tasks
 
-# --- Configuration (via variables d'environnement) ---
+# --- Configuration (via environment variables) ---
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 CHANNEL_ID = int(os.environ["ANNOUNCE_CHANNEL_ID"])
 TWITCH_CLIENT_ID = os.environ["TWITCH_CLIENT_ID"]
@@ -35,7 +35,7 @@ _igdb_token_expiry = 0.0
 
 
 def get_igdb_token():
-    """Récupère (et met en cache) un token d'accès Twitch/IGDB."""
+    """Fetches (and caches) a Twitch/IGDB access token."""
     global _igdb_token, _igdb_token_expiry
     if _igdb_token and time_module.time() < _igdb_token_expiry:
         return _igdb_token
@@ -52,13 +52,13 @@ def get_igdb_token():
     response.raise_for_status()
     data = response.json()
     _igdb_token = data["access_token"]
-    # On retire 60s de marge de sécurité avant expiration réelle
+    # 60s safety margin before actual expiration
     _igdb_token_expiry = time_module.time() + data["expires_in"] - 60
     return _igdb_token
 
 
 def build_cover_url(cover_url):
-    """Transforme l'URL de cover IGDB (miniature) en image grand format."""
+    """Turns an IGDB cover URL (thumbnail) into a larger image."""
     if not cover_url:
         return None
     if cover_url.startswith("//"):
@@ -67,11 +67,11 @@ def build_cover_url(cover_url):
 
 
 def get_todays_releases():
-    """Interroge l'endpoint release_dates d'IGDB (une entrée par sortie, par
-    plateforme/région), pour capter les sorties du jour même quand le jeu est
-    déjà sorti sur une autre plateforme auparavant. Renvoie les TOP_N les
-    plus populaires (le tri par score fait office de filtre : pas de filtre
-    de catégorie, car beaucoup de jeux n'ont pas ce champ renseigné)."""
+    """Queries the IGDB release_dates endpoint (one entry per release, per
+    platform/region) to catch today's releases even when the game already
+    shipped on another platform earlier. Returns the TOP_N most popular
+    (score-based ranking acts as the filter: no category filter, since many
+    games don't have that field populated)."""
     token = get_igdb_token()
 
     today_str = datetime.now(PARIS_TZ).strftime("%Y-%m-%d")
@@ -86,7 +86,8 @@ def get_todays_releases():
     }
     body = (
         "fields date,game.id,game.name,game.summary,game.url,"
-        "game.hypes,game.follows,game.total_rating,game.cover.url;"
+        "game.hypes,game.follows,game.total_rating,game.cover.url,"
+        "game.platforms.name;"
         f" where date >= {start_ts} & date < {end_ts};"
         " limit 500;"
     )
@@ -95,13 +96,13 @@ def get_todays_releases():
         "https://api.igdb.com/v4/release_dates", headers=headers, data=body, timeout=15
     )
     if not response.ok:
-        print(f"⚠️ Erreur HTTP IGDB {response.status_code} : {response.text}")
+        print(f"⚠️ IGDB HTTP error {response.status_code}: {response.text}")
         response.raise_for_status()
 
     entries = response.json()
 
-    # Un même jeu peut apparaître plusieurs fois (une entrée par plateforme/région) :
-    # on ne garde qu'une entrée par jeu.
+    # A game can appear multiple times (one entry per platform/region):
+    # keep only one entry per game.
     games_by_id = {}
     for entry in entries:
         game = entry.get("game")
@@ -110,7 +111,7 @@ def get_todays_releases():
         games_by_id[game["id"]] = game
 
     games = list(games_by_id.values())
-    print(f"ℹ️ {len(games)} sortie(s) trouvée(s) aujourd'hui, avant sélection du top {TOP_N}")
+    print(f"ℹ️ {len(games)} release(s) found today, before picking the top {TOP_N}")
 
     for game in games:
         hypes = game.get("hypes") or 0
@@ -124,51 +125,56 @@ def get_todays_releases():
 
 @tasks.loop(time=ANNOUNCE_TIME)
 async def check_releases():
-    """S'exécute une fois par jour, pile à ANNOUNCE_TIME (heure de Paris)."""
+    """Runs once a day, exactly at ANNOUNCE_TIME (Paris timezone)."""
     await client.wait_until_ready()
 
     channel = client.get_channel(CHANNEL_ID)
     if channel is None:
-        print("⚠️ Channel introuvable, vérifie ANNOUNCE_CHANNEL_ID")
+        print("⚠️ Channel not found, check ANNOUNCE_CHANNEL_ID")
         return
 
     try:
         games = get_todays_releases()
     except Exception as e:
-        print(f"⚠️ Erreur lors de la requête IGDB : {e}")
+        print(f"⚠️ Error while querying IGDB: {e}")
         return
 
     if not games:
-        print("ℹ️ Aucune sortie notable aujourd'hui.")
+        print("ℹ️ No notable releases today.")
         return
 
+    await channel.send(f"🎮 **Today's Top {len(games)} Game Release{'s' if len(games) > 1 else ''}**")
+
     for game in games:
-        name = game.get("name", "Jeu inconnu")
+        name = game.get("name", "Unknown game")
         summary = game.get("summary", "")
-        if summary and len(summary) > 300:
-            summary = summary[:297] + "..."
+        if summary and len(summary) > 350:
+            summary = summary[:347] + "..."
         url = game.get("url", "")
         cover = build_cover_url((game.get("cover") or {}).get("url"))
+        platforms = [p.get("name") for p in (game.get("platforms") or []) if p.get("name")]
 
         embed = discord.Embed(
-            title=f"🎮 Sortie du jour : {name}",
-            description=summary or "Disponible dès aujourd'hui !",
+            title=name,
+            description=summary or "Available today!",
             url=url or None,
             color=discord.Color.blurple(),
         )
+        if platforms:
+            embed.add_field(name="Platforms", value=", ".join(platforms), inline=False)
+        if url:
+            embed.add_field(name="More info", value=f"[IGDB page]({url})", inline=False)
         if cover:
             embed.set_image(url=cover)
-        if url:
-            embed.add_field(name="Plus d'infos", value=f"[Fiche IGDB]({url})", inline=False)
 
         await channel.send(embed=embed)
-        print(f"✅ Annonce postée : {name}")
+        print(f"✅ Announced: {name}")
 
 
 @client.event
 async def on_ready():
-    print(f"Connecté en tant que {client.user}")
-    print(f"Vérification programmée chaque jour à {ANNOUNCE_HOUR:02d}:{ANNOUNCE_MINUTE:02d} (heure de Paris)")
+    print(f"Logged in as {client.user}")
+    print(f"Daily check scheduled at {ANNOUNCE_HOUR:02d}:{ANNOUNCE_MINUTE:02d} (Paris time)")
     if not check_releases.is_running():
         check_releases.start()
 
