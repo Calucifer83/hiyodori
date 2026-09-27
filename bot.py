@@ -143,7 +143,7 @@ async def check_releases():
         print("ℹ️ No notable releases today.")
         return
 
-    await channel.send(f"🎮 **Today's Top {len(games)} Game Release{'s' if len(games) > 1 else ''}**")
+    await channel.send(f"🎮 **Today's Top Game Release{'s' if len(games) > 1 else ''}**")
 
     for game in games:
         name = game.get("name", "Unknown game")
