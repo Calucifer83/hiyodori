@@ -1,1 +1,29 @@
+name: Daily Game Release Announcement
 
+on:
+  schedule:
+    - cron: "0 9 * * *"
+      timezone: "Europe/Paris"
+  workflow_dispatch: {}   # lets you trigger it manually from the Actions tab, for testing
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run announcement script
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          ANNOUNCE_CHANNEL_ID: ${{ secrets.ANNOUNCE_CHANNEL_ID }}
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          TOP_N: "5"
+        run: python announce_releases.py
