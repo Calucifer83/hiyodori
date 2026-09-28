@@ -119,7 +119,7 @@ def main():
         return
 
     post_discord_message({
-        "content": f"🎮 **Today's Top {len(games)} Game Release{'s' if len(games) > 1 else ''}**"
+        "content": f"🎮 **Today's Top Game Release{'s' if len(games) > 1 else ''}**"
     })
 
     for game in games:
