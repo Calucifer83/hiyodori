@@ -25,5 +25,6 @@ jobs:
           ANNOUNCE_CHANNEL_ID: ${{ secrets.ANNOUNCE_CHANNEL_ID }}
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
           TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          ANNOUNCE_ROLE_ID: ${{ secrets.ANNOUNCE_ROLE_ID }}
           TOP_N: "5"
         run: python announce_releases.py
