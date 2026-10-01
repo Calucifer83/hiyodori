@@ -19,6 +19,7 @@ CHANNEL_ID = os.environ["ANNOUNCE_CHANNEL_ID"]
 TWITCH_CLIENT_ID = os.environ["TWITCH_CLIENT_ID"]
 TWITCH_CLIENT_SECRET = os.environ["TWITCH_CLIENT_SECRET"]
 TOP_N = int(os.environ.get("TOP_N", "5"))
+ANNOUNCE_ROLE_ID = os.environ.get("ANNOUNCE_ROLE_ID", "")
 
 PARIS_TZ = ZoneInfo("Europe/Paris")
 DISCORD_API = "https://discord.com/api/v10"
@@ -118,8 +119,10 @@ def main():
         print("ℹ️ No notable releases today.")
         return
 
+    mention = f"<@&{ANNOUNCE_ROLE_ID}> " if ANNOUNCE_ROLE_ID else ""
     post_discord_message({
-        "content": f"🎮 **Today's Top Game Release{'s' if len(games) > 1 else ''}**"
+        "content": f"{mention}🎮 **Today's Top {len(games)} Game Release{'s' if len(games) > 1 else ''}**",
+        "allowed_mentions": {"roles": [ANNOUNCE_ROLE_ID]} if ANNOUNCE_ROLE_ID else {"parse": []},
     })
 
     for game in games:
