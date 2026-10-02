@@ -203,7 +203,11 @@ def main():
         name = game.get("name", "Unknown game")
         summary = game.get("summary", "")
         if summary and len(summary) > 180:
-            summary = summary[:177] + "..."
+            truncated = summary[:177]
+            last_space = truncated.rfind(" ")
+            if last_space > 0:
+                truncated = truncated[:last_space]
+            summary = truncated.rstrip(".,;:!?") + "..."
         url = game.get("url", "")
         platforms = [p.get("name") for p in (game.get("platforms") or []) if p.get("name")]
 
