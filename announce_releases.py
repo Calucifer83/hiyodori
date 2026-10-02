@@ -27,7 +27,7 @@ ANNOUNCE_ROLE_ID = os.environ.get("ANNOUNCE_ROLE_ID", "")
 
 PARIS_TZ = ZoneInfo("Europe/Paris")
 DISCORD_API = "https://discord.com/api/v10"
-BLURPLE = 0x5865F2
+COLOR = 0xF2A366
 
 # --- Grid image settings ---
 CELL_WIDTH = 264
@@ -228,7 +228,7 @@ def main():
     mention = f"<@&{ANNOUNCE_ROLE_ID}> " if ANNOUNCE_ROLE_ID else ""
     embed = {
         "title": f"🎮 Today's Top {len(games)} Game Release{'s' if len(games) > 1 else ''}",
-        "color": BLURPLE,
+        "color": COLOR,
         "image": {"url": "attachment://grid.png"},
         "fields": fields,
     }
