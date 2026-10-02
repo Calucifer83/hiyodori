@@ -2,17 +2,21 @@
 Daily game release announcement script (runs once, via GitHub Actions).
 --------------------------------------------------------------------------
 Queries IGDB for today's game releases (Paris timezone), ranks them by a
-popularity score, and posts the top N to a Discord channel via a single
-REST call (no persistent bot connection needed).
+popularity score, builds a single cover-art grid image, and posts ONE
+compact message (one embed, one attached grid image, one field per game)
+to a Discord channel.
 """
 
+import io
+import json
 import os
 import sys
-import time
 from datetime import datetime, timezone
+from math import ceil
 from zoneinfo import ZoneInfo
 
 import requests
+from PIL import Image, ImageDraw, ImageFont
 
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 CHANNEL_ID = os.environ["ANNOUNCE_CHANNEL_ID"]
@@ -24,6 +28,14 @@ ANNOUNCE_ROLE_ID = os.environ.get("ANNOUNCE_ROLE_ID", "")
 PARIS_TZ = ZoneInfo("Europe/Paris")
 DISCORD_API = "https://discord.com/api/v10"
 BLURPLE = 0x5865F2
+
+# --- Grid image settings ---
+CELL_WIDTH = 264
+CELL_HEIGHT = 352
+CELL_PADDING = 12
+GRID_COLUMNS = 5  # wraps to a new row automatically beyond 5 games
+GRID_BG_COLOR = (43, 45, 49)  # close to Discord's dark theme background
+PLACEHOLDER_COLOR = (79, 84, 92)
 
 
 def get_igdb_token():
@@ -95,17 +107,82 @@ def get_todays_releases(igdb_token):
     return games[:TOP_N]
 
 
-def post_discord_message(payload):
-    headers = {
-        "Authorization": f"Bot {DISCORD_TOKEN}",
-        "Content-Type": "application/json",
-    }
-    response = requests.post(
-        f"{DISCORD_API}/channels/{CHANNEL_ID}/messages",
-        headers=headers,
-        json=payload,
-        timeout=15,
-    )
+def fetch_cover_image(cover_url):
+    """Downloads a cover image and returns it as a PIL Image, or None on failure."""
+    if not cover_url:
+        return None
+    try:
+        response = requests.get(cover_url, timeout=15)
+        response.raise_for_status()
+        return Image.open(io.BytesIO(response.content)).convert("RGB")
+    except Exception as e:
+        print(f"⚠️ Could not download cover ({cover_url}): {e}")
+        return None
+
+
+def build_grid_image(games):
+    """Builds a single grid image from each game's cover, numbered to match
+    the embed fields below it. Returns PNG bytes."""
+    count = len(games)
+    columns = min(count, GRID_COLUMNS)
+    rows = ceil(count / columns)
+
+    grid_width = columns * CELL_WIDTH + (columns + 1) * CELL_PADDING
+    grid_height = rows * CELL_HEIGHT + (rows + 1) * CELL_PADDING
+
+    grid = Image.new("RGB", (grid_width, grid_height), GRID_BG_COLOR)
+    draw = ImageDraw.Draw(grid)
+    font = ImageFont.load_default(size=28)
+
+    for index, game in enumerate(games):
+        col = index % columns
+        row = index // columns
+        x = CELL_PADDING + col * (CELL_WIDTH + CELL_PADDING)
+        y = CELL_PADDING + row * (CELL_HEIGHT + CELL_PADDING)
+
+        cover_url = build_cover_url((game.get("cover") or {}).get("url"))
+        cover_img = fetch_cover_image(cover_url)
+
+        if cover_img:
+            cover_img = cover_img.resize((CELL_WIDTH, CELL_HEIGHT))
+        else:
+            cover_img = Image.new("RGB", (CELL_WIDTH, CELL_HEIGHT), PLACEHOLDER_COLOR)
+
+        grid.paste(cover_img, (x, y))
+
+        # Number badge in the top-left corner, to match the embed field below
+        badge_text = str(index + 1)
+        draw.rectangle([x, y, x + 34, y + 34], fill=(0, 0, 0))
+        draw.text((x + 10, y + 5), badge_text, fill=(255, 255, 255), font=font)
+
+    buffer = io.BytesIO()
+    grid.save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer.read()
+
+
+def post_discord_message(payload, image_bytes=None, image_filename="grid.png"):
+    headers = {"Authorization": f"Bot {DISCORD_TOKEN}"}
+
+    if image_bytes:
+        files = {"file": (image_filename, image_bytes, "image/png")}
+        data = {"payload_json": json.dumps(payload)}
+        response = requests.post(
+            f"{DISCORD_API}/channels/{CHANNEL_ID}/messages",
+            headers=headers,
+            data=data,
+            files=files,
+            timeout=30,
+        )
+    else:
+        headers["Content-Type"] = "application/json"
+        response = requests.post(
+            f"{DISCORD_API}/channels/{CHANNEL_ID}/messages",
+            headers=headers,
+            json=payload,
+            timeout=15,
+        )
+
     if not response.ok:
         print(f"⚠️ Discord HTTP error {response.status_code}: {response.text}")
         response.raise_for_status()
@@ -119,38 +196,47 @@ def main():
         print("ℹ️ No notable releases today.")
         return
 
-    mention = f"<@&{ANNOUNCE_ROLE_ID}> " if ANNOUNCE_ROLE_ID else ""
-    post_discord_message({
-        "content": f"{mention}🎮 **Today's Top {len(games)} Game Release{'s' if len(games) > 1 else ''}**",
-        "allowed_mentions": {"roles": [ANNOUNCE_ROLE_ID]} if ANNOUNCE_ROLE_ID else {"parse": []},
-    })
+    grid_bytes = build_grid_image(games)
 
-    for game in games:
+    fields = []
+    for index, game in enumerate(games, start=1):
         name = game.get("name", "Unknown game")
         summary = game.get("summary", "")
-        if summary and len(summary) > 350:
-            summary = summary[:347] + "..."
+        if summary and len(summary) > 180:
+            summary = summary[:177] + "..."
         url = game.get("url", "")
-        cover = build_cover_url((game.get("cover") or {}).get("url"))
         platforms = [p.get("name") for p in (game.get("platforms") or []) if p.get("name")]
 
-        embed = {"title": name, "description": summary or "Available today!", "color": BLURPLE}
-        if url:
-            embed["url"] = url
-
-        fields = []
+        value_lines = []
+        if summary:
+            value_lines.append(summary)
         if platforms:
-            fields.append({"name": "Platforms", "value": ", ".join(platforms), "inline": False})
+            value_lines.append(f"**Platforms:** {', '.join(platforms)}")
         if url:
-            fields.append({"name": "More info", "value": f"[IGDB page]({url})", "inline": False})
-        if fields:
-            embed["fields"] = fields
-        if cover:
-            embed["image"] = {"url": cover}
+            value_lines.append(f"[IGDB page]({url})")
 
-        post_discord_message({"embeds": [embed]})
-        print(f"✅ Announced: {name}")
-        time.sleep(1)  # small delay to stay well clear of Discord rate limits
+        fields.append({
+            "name": f"{index}. {name}",
+            "value": "\n".join(value_lines) or "No description available.",
+            "inline": False,
+        })
+
+    mention = f"<@&{ANNOUNCE_ROLE_ID}> " if ANNOUNCE_ROLE_ID else ""
+    embed = {
+        "title": f"🎮 Today's Top {len(games)} Game Release{'s' if len(games) > 1 else ''}",
+        "color": BLURPLE,
+        "image": {"url": "attachment://grid.png"},
+        "fields": fields,
+    }
+
+    payload = {
+        "content": mention or None,
+        "embeds": [embed],
+        "allowed_mentions": {"roles": [ANNOUNCE_ROLE_ID]} if ANNOUNCE_ROLE_ID else {"parse": []},
+    }
+
+    post_discord_message(payload, image_bytes=grid_bytes)
+    print(f"✅ Announced {len(games)} game(s) in a single message")
 
 
 if __name__ == "__main__":
