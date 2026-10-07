@@ -27,7 +27,7 @@ ANNOUNCE_ROLE_ID = os.environ.get("ANNOUNCE_ROLE_ID", "")
 
 PARIS_TZ = ZoneInfo("Europe/Paris")
 DISCORD_API = "https://discord.com/api/v10"
-BLURPLE = 0x5865F2
+BLURPLE = 0xF2A366
 
 # --- Grid image settings ---
 CELL_WIDTH = 264
