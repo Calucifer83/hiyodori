@@ -27,7 +27,7 @@ ANNOUNCE_ROLE_ID = os.environ.get("ANNOUNCE_ROLE_ID", "")
 
 PARIS_TZ = ZoneInfo("Europe/Paris")
 DISCORD_API = "https://discord.com/api/v10"
-COLOR = 0xF2A366
+BLURPLE = 0x5865F2
 
 # --- Grid image settings ---
 CELL_WIDTH = 264
@@ -72,7 +72,7 @@ def get_todays_releases(igdb_token):
         "Content-Type": "text/plain",
     }
     body = (
-        "fields date,game.id,game.name,game.summary,game.url,"
+        "fields date,status,game.id,game.name,game.summary,game.url,"
         "game.hypes,game.follows,game.total_rating,game.cover.url,"
         "game.platforms.name;"
         f" where date >= {start_ts} & date < {end_ts};"
@@ -87,8 +87,17 @@ def get_todays_releases(igdb_token):
 
     entries = response.json()
 
+    # Per-date statuses that don't represent an actual release (5=offline i.e.
+    # servers shut down, 6=cancelled, 7=rumored, 8=delisted). A missing status
+    # is treated as a genuine release, per IGDB's own contribution guidelines.
+    EXCLUDED_STATUSES = {5, 6, 7, 8}
+
     games_by_id = {}
     for entry in entries:
+        if entry.get("status") in EXCLUDED_STATUSES:
+            print(f"ℹ️ Skipping non-release entry (status={entry.get('status')}): "
+                  f"{(entry.get('game') or {}).get('name')}")
+            continue
         game = entry.get("game")
         if not game or "id" not in game:
             continue
@@ -203,11 +212,7 @@ def main():
         name = game.get("name", "Unknown game")
         summary = game.get("summary", "")
         if summary and len(summary) > 180:
-            truncated = summary[:177]
-            last_space = truncated.rfind(" ")
-            if last_space > 0:
-                truncated = truncated[:last_space]
-            summary = truncated.rstrip(".,;:!?") + "..."
+            summary = summary[:177] + "..."
         url = game.get("url", "")
         platforms = [p.get("name") for p in (game.get("platforms") or []) if p.get("name")]
 
@@ -228,7 +233,7 @@ def main():
     mention = f"<@&{ANNOUNCE_ROLE_ID}> " if ANNOUNCE_ROLE_ID else ""
     embed = {
         "title": f"🎮 Today's Top {len(games)} Game Release{'s' if len(games) > 1 else ''}",
-        "color": COLOR,
+        "color": BLURPLE,
         "image": {"url": "attachment://grid.png"},
         "fields": fields,
     }
