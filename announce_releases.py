@@ -73,7 +73,7 @@ def get_todays_releases(igdb_token):
     }
     body = (
         "fields date,status,game.id,game.name,game.summary,game.url,"
-        "game.hypes,game.follows,game.total_rating,game.cover.url,"
+        "game.first_release_date,game.hypes,game.follows,game.total_rating,game.cover.url,"
         "game.platforms.name;"
         f" where date >= {start_ts} & date < {end_ts};"
         " limit 500;"
@@ -100,6 +100,10 @@ def get_todays_releases(igdb_token):
             continue
         game = entry.get("game")
         if not game or "id" not in game:
+            continue
+        first_release = game.get("first_release_date")
+        if first_release and first_release < start_ts:
+            print(f"ℹ️ Skipping {game.get('name')}: already released earlier on another platform")
             continue
         games_by_id[game["id"]] = game
 
