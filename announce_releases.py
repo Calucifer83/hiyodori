@@ -59,6 +59,14 @@ def build_cover_url(cover_url):
         cover_url = "https:" + cover_url
     return cover_url.replace("t_thumb", "t_cover_big")
 
+def earliest_full_release(game):
+    """Earliest timestamp of a genuine full release for this game, or None."""
+    dates = []
+    for rd in game.get("release_dates") or []:
+        status_name = ((rd.get("status") or {}).get("name") or "").strip().lower()
+        if rd.get("date") and (not status_name or status_name == "full release"):
+            dates.append(rd["date"])
+    return min(dates) if dates else None
 
 def get_todays_releases(igdb_token):
     today_str = datetime.now(PARIS_TZ).strftime("%Y-%m-%d")
@@ -72,8 +80,9 @@ def get_todays_releases(igdb_token):
         "Content-Type": "text/plain",
     }
     body = (
-        "fields date,status,game.id,game.name,game.summary,game.url,"
-        "game.first_release_date,game.hypes,game.follows,game.total_rating,game.cover.url,"
+        "fields date,status.name,game.id,game.name,game.summary,game.url,"
+        "game.release_dates.date,game.release_dates.status.name,"
+        "game.hypes,game.follows,game.total_rating,game.cover.url,"
         "game.platforms.name;"
         f" where date >= {start_ts} & date < {end_ts};"
         " limit 500;"
@@ -87,23 +96,22 @@ def get_todays_releases(igdb_token):
 
     entries = response.json()
 
-    # Per-date statuses that don't represent an actual release (5=offline i.e.
-    # servers shut down, 6=cancelled, 7=rumored, 8=delisted). A missing status
-    # is treated as a genuine release, per IGDB's own contribution guidelines.
-    EXCLUDED_STATUSES = {5, 6, 7, 8}
-
+    # Only keep dates that are a genuine full release. A missing status is
+    # treated as a full release. Early access, alpha, beta, offline, cancelled,
+    # rumored and delisted entries are skipped.
     games_by_id = {}
     for entry in entries:
-        if entry.get("status") in EXCLUDED_STATUSES:
-            print(f"ℹ️ Skipping non-release entry (status={entry.get('status')}): "
+        status_name = ((entry.get("status") or {}).get("name") or "").strip().lower()
+        if status_name and status_name != "full release":
+            print(f"ℹ️ Skipping non-full-release entry (status={status_name}): "
                   f"{(entry.get('game') or {}).get('name')}")
             continue
         game = entry.get("game")
         if not game or "id" not in game:
             continue
-        first_release = game.get("first_release_date")
-        if first_release and first_release < start_ts:
-            print(f"ℹ️ Skipping {game.get('name')}: already released earlier on another platform")
+        earliest = earliest_full_release(game)
+        if earliest and earliest < start_ts:
+            print(f"ℹ️ Skipping {game.get('name')}: already fully released earlier on another platform")
             continue
         games_by_id[game["id"]] = game
 
